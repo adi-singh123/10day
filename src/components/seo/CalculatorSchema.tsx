@@ -1,0 +1,220 @@
+import { getComparisonCalculators } from "@/src/lib/calculators/getComparisonCalculators";
+
+type Step = {
+  step: number;
+  title: string;
+  description: string;
+};
+
+type FAQ = {
+  question: string;
+  answer: string;
+};
+
+type CalculatorSchemaProps = {
+  calculator: {
+    slug: string;
+    name: string;
+    description: string;
+    category: string;
+    steps: Step[];
+    faqs: FAQ[];
+    compareWith?: string[];
+  };
+};
+
+export default async function CalculatorSchema({
+  calculator,
+}: CalculatorSchemaProps) {
+  const url = `https://www.devcalc.in/${calculator.slug}`;
+  const comparisonCalculators = await getComparisonCalculators({
+    currentSlug: calculator.slug,
+    category: calculator.category,
+    compareWith: calculator.compareWith,
+  });
+
+  const categoryMap: Record<
+    string,
+    string
+  > = {
+    Finance:
+      "FinanceApplication",
+    Health:
+      "HealthApplication",
+    Education:
+      "EducationalApplication",
+    Utility:
+      "UtilitiesApplication",
+    Vehicle:
+      "UtilitiesApplication",
+    Construction:
+      "DesignApplication",
+    Other:
+      "UtilitiesApplication",
+    Math:
+      "EducationalApplication",
+    "Developer Tools":
+      "DeveloperApplication",
+      Fun:
+    "GameApplication",
+  };
+
+  const schema = {
+    "@context":
+      "https://schema.org",
+
+    "@graph": [
+      {
+        "@type": "WebPage",
+
+        "@id":
+          `${url}#webpage`,
+
+        url,
+
+        name:
+          calculator.name,
+
+        description:
+          calculator.description,
+
+        inLanguage: "en-IN",
+
+        mainEntity: {
+          "@id": `${url}#application`,
+        },
+
+        isPartOf: {
+          "@id":
+            "https://www.devcalc.in/#website",
+        },
+
+        about: {
+          "@id":
+            `${url}#application`,
+        },
+      },
+
+      {
+        "@type": [
+          "SoftwareApplication",
+          "WebApplication",
+        ],
+
+        "@id":
+          `${url}#application`,
+
+        name:
+          calculator.name,
+
+        applicationCategory:
+          categoryMap[
+            calculator.category
+          ] ??
+          "UtilitiesApplication",
+
+        operatingSystem:
+          "Any",
+
+        browserRequirements:
+          "Requires JavaScript",
+
+        description:
+          calculator.description,
+
+        url,
+
+        isAccessibleForFree: true,
+
+        publisher: {
+          "@id": "https://www.devcalc.in/#organization",
+        },
+
+        featureList: calculator.steps.map(
+          (step) => step.title,
+        ),
+
+        offers: {
+          "@type":
+            "Offer",
+
+          price: "0",
+
+          priceCurrency:
+            "INR",
+        },
+      },
+
+      {
+        "@type": "HowTo",
+
+        "@id":
+          `${url}#howto`,
+
+        name: `How to use ${calculator.name}`,
+
+        description:
+          calculator.description,
+
+        step:
+          calculator.steps.map(
+            (step) => ({
+              "@type":
+                "HowToStep",
+
+              position:
+                step.step,
+
+              name:
+                step.title,
+
+              text:
+                step.description,
+            }),
+          ),
+      },
+
+      ...(comparisonCalculators.length
+        ? [
+            {
+              "@type":
+                "ItemList",
+
+              "@id":
+                `${url}#compare`,
+
+              name:
+                "Compare Calculators",
+
+              itemListElement:
+                comparisonCalculators.map(
+                  (item, index) => ({
+                    "@type":
+                      "ListItem",
+
+                    position:
+                      index + 1,
+
+                    name: item.name,
+
+                    url: `https://www.devcalc.in/${item.slug}`,
+                  }),
+                ),
+            },
+          ]
+        : []),
+    ],
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{
+        __html:
+          JSON.stringify(
+            schema,
+          ).replace(/</g, "\\u003c"),
+      }}
+    />
+  );
+}

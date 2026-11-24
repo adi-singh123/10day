@@ -1,0 +1,65 @@
+import { createClient } from "@libsql/client";
+import { config } from "dotenv";
+
+config({ path: ".env.local", override: false, quiet: true });
+const url = process.env.TURSO_DATABASE_URL?.trim();
+const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+if (!url || !authToken) throw new Error("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are required in .env.local.");
+
+const client = createClient({ url, authToken });
+try {
+  const schema = await client.execute("PRAGMA table_info(blog_posts)");
+  const summary = await client.execute(`
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
+      SUM(CASE WHEN json_array_length(keywords_json) < 5 THEN 1 ELSE 0 END) AS insufficient_keywords,
+      SUM(CASE WHEN NOT json_valid(content_json) THEN 1 ELSE 0 END) AS invalid_content,
+      SUM(CASE WHEN NOT json_valid(faqs_json) THEN 1 ELSE 0 END) AS invalid_faqs,
+      SUM(CASE WHEN status = 'published' AND TRIM(image_url) = '' THEN 1 ELSE 0 END) AS missing_images,
+      SUM(CASE WHEN status = 'published' AND (image_alt IS NULL OR TRIM(image_alt) = '') THEN 1 ELSE 0 END) AS missing_image_alt
+    FROM blog_posts
+  `);
+  const missingImages = await client.execute(`
+    SELECT slug, title, image_url, image_alt
+    FROM blog_posts
+    WHERE status = 'published'
+      AND (TRIM(image_url) = '' OR image_alt IS NULL OR TRIM(image_alt) = '')
+    ORDER BY published_at DESC, id DESC
+  `);
+  const testTable = await client.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'devcalc_connection_test'");
+  const sitePages = await client.execute(`
+    SELECT slug, body_html
+    FROM site_pages
+    WHERE status = 'published' AND slug IN ('about', 'privacy-policy', 'terms')
+    ORDER BY slug
+  `);
+  if (schema.rows.length !== 23) throw new Error(`Expected 23 blog_posts columns, found ${schema.rows.length}.`);
+  if (Number(summary.rows[0]?.total ?? 0) === 0) throw new Error("blog_posts contains no articles.");
+  if (Number(summary.rows[0]?.insufficient_keywords ?? 0)) throw new Error("One or more blogs have fewer than five SEO keywords.");
+  if (Number(summary.rows[0]?.invalid_content ?? 0) || Number(summary.rows[0]?.invalid_faqs ?? 0)) throw new Error("One or more blog JSON documents are invalid.");
+  if (testTable.rows.length) throw new Error("The obsolete devcalc_connection_test table still exists.");
+  if (sitePages.rows.length !== 3) throw new Error("Expected three published informational site pages.");
+  for (const page of sitePages.rows) {
+    const html = String(page.body_html ?? "");
+    if (!/<main\b/i.test(html) || !/<h1\b/i.test(html)) {
+      throw new Error(`Site page ${page.slug} is missing its server-rendered main content or H1.`);
+    }
+  }
+  console.log(JSON.stringify({
+    columns: schema.rows.length,
+    total: Number(summary.rows[0]?.total ?? 0),
+    published: Number(summary.rows[0]?.published ?? 0),
+    missingImages: Number(summary.rows[0]?.missing_images ?? 0),
+    missingImageAlt: Number(summary.rows[0]?.missing_image_alt ?? 0),
+    imageProblems: missingImages.rows.map((row) => ({
+      slug: String(row.slug),
+      title: String(row.title),
+      imageUrl: String(row.image_url ?? ""),
+      imageAlt: String(row.image_alt ?? ""),
+    })),
+    sitePages: sitePages.rows.map((page) => String(page.slug)),
+    testTableRemoved: true,
+  }, null, 2));
+} finally {
+  client.close();
+}

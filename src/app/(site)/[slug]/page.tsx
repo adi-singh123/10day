@@ -1,0 +1,246 @@
+import { notFound } from "next/navigation";
+import { BadgeCheck } from "lucide-react";
+import { getCalculatorBySlug, getPublishedCalculatorSlugsFresh } from "@/src/lib/calculators/repository";
+import type { Metadata } from "next";
+import { generateCalculatorMetadata } from "@/src/lib/seo/generateMetadata";
+import Breadcrumbs from "@/src/components/seo/Breadcrumb";
+import CalculatorRenderer from "@/src/components/calculator/CalculatorRenderer";
+import StepsSection from "@/src/components/calculator/StepsSection";
+import FormulaSection from "@/src/components/calculator/FormulaSection";
+import FAQSection from "@/src/components/calculator/FAQSection";
+import FAQSchema from "@/src/components/seo/FAQSchema";
+import SEOContent from "@/src/components/home/SEOContent";
+import CompareCalculatorSection from "@/src/components/calculator/CompareCalculatorSection";
+import CalculatorSchema from "@/src/components/seo/CalculatorSchema";
+import BreadcrumbSchema from "@/src/components/seo/BreadcrumbSchema";
+import CalculatorListByCategory from "@/src/components/calculator/Calculatorlistbycategory";
+import AuthorBio from "@/src/components/common/AuthorBio";
+import StateSelectorSection from "@/src/components/calculator/StateSelectorSection";
+import { getCategorySlug } from "@/src/data/categories/Category";
+import EmbedCalculatorSection from "@/src/components/calculator/EmbedCalculatorSection";
+import LatestArticlesForCalculator from "@/src/components/blog/LatestArticlesForCalculator";
+import CalculatorPageHero from "@/src/components/calculator/CalculatorPageHero";
+
+// Calculator content is database-backed and rendered on every request so
+// updates are reflected without a deployment and remain present in page HTML.
+// Render complete HTML on the server, then reuse it briefly at the edge.
+// Database edits become visible without a deployment after this interval.
+export const revalidate = 300;
+export const dynamicParams = true;
+
+// Pre-render every published calculator during deployment. Existing pages are
+// then served as cached HTML and refreshed with ISR, while dynamicParams keeps
+// newly added database calculators available before the next deployment.
+export async function generateStaticParams() {
+  const slugs = await getPublishedCalculatorSlugsFresh();
+  return slugs.map((slug) => ({ slug }));
+}
+
+// Category-appropriate YMYL disclaimer for ad-bearing content.
+function getDisclaimer(category: string): string | undefined {
+  const key = category.toLowerCase();
+  if (key === "finance") {
+    return "This calculator and its guidance are for general educational purposes only and do not constitute financial, investment, or tax advice. Verify figures with a qualified professional before making financial decisions.";
+  }
+  if (key === "health") {
+    return "This calculator is for general informational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Consult a qualified healthcare provider for health decisions.";
+  }
+  if (key === "developer tools") {
+    return "Website carbon values are estimates based on observed public transfers and published model constants. Browser requests, caching, devices and electricity sources can change actual emissions; this is not a certified environmental assessment.";
+  }
+  return undefined;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+
+  const calculator = await getCalculatorBySlug(slug);
+
+  if (!calculator) {
+    return {};
+  }
+
+  return generateCalculatorMetadata({
+    slug: calculator.slug,
+    title: calculator.seo.title,
+    description: calculator.seo.description,
+    keywords: calculator.seo.keywords,
+  });
+}
+
+type Props = {
+  params: Promise<{
+    slug: string;
+  }>;
+};
+
+export default async function CalculatorPage({ params }: Props) {
+  const { slug } = await params;
+
+  const calculator = await getCalculatorBySlug(slug);
+
+  if (!calculator) {
+    notFound();
+  }
+
+  const hasCuratedComparisons = Boolean(calculator.compareWith?.length);
+  const showEditorialAccountability = ["Finance", "Health", "Construction", "Vehicle"].includes(calculator.category);
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-12">
+      <FAQSchema faqs={calculator.faqs} />
+      <CalculatorSchema calculator={calculator} />
+      <BreadcrumbSchema
+        items={[
+          {
+            name: "Home",
+            url: "/",
+          },
+          {
+            name: "Calculators",
+            url: "/calculators",
+          },
+          {
+            name: calculator.category,
+            url: `/category/${getCategorySlug(calculator.category)}`,
+          },
+          {
+            name: calculator.name,
+            url: `/${calculator.slug}`,
+          },
+        ]}
+      />
+
+      <Breadcrumbs
+        items={[
+          {
+            label: "Calculators",
+            href: "/calculators",
+          },
+          {
+            label: calculator.category,
+            href: `/category/${getCategorySlug(calculator.category)}`,
+          },
+          {
+            label: calculator.name,
+          },
+        ]}
+      />
+
+      <CalculatorPageHero calculator={calculator} />
+      <div className="mt-10 grid gap-8 lg:grid-cols-[1fr_320px]">
+        <div className="min-w-0">
+          <div className="calculator-shell w-full min-w-0 overflow-x-hidden">
+            <CalculatorRenderer slug={calculator.slug} />
+          </div>
+
+          {calculator.benchmarkContext && (
+            <div className="mt-8 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/80 via-white to-amber-50/40 p-5 shadow-sm dark:border-blue-900/40 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/70 pb-3 dark:border-slate-800">
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                  <BadgeCheck size={14} /> {calculator.benchmarkContext.badge}
+                </span>
+                <span className="text-xs text-stone-500 dark:text-slate-400">
+                  Reviewed: {calculator.benchmarkContext.lastUpdated}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {calculator.benchmarkContext.title}
+                </h3>
+                <span className="text-lg font-mono font-bold text-blue-700 dark:text-blue-400">
+                  {calculator.benchmarkContext.stat}
+                </span>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                {calculator.benchmarkContext.description}
+              </p>
+              <div className="mt-3 pt-2 border-t border-stone-100 dark:border-slate-800 text-[11px] text-stone-500 dark:text-slate-400">
+                Reference: <span className="font-medium text-slate-700 dark:text-slate-300">{calculator.benchmarkContext.source}</span>
+              </div>
+            </div>
+          )}
+
+          {hasCuratedComparisons && (
+            <CompareCalculatorSection
+              currentSlug={calculator.slug}
+              category={calculator.category}
+              compareWith={calculator.compareWith}
+            />
+          )}
+
+          {calculator.slug === "road-tax-calculator" && (
+            <StateSelectorSection
+              type="road-tax"
+              title="Select Your State for Exact RTO Road Tax Slabs"
+              subtitle="Get exact 2026 motor vehicle tax brackets, diesel surcharges, EV policy exemptions, and local RTO registration guidelines."
+            />
+          )}
+
+          {calculator.slug === "stamp-duty-calculator" && (
+            <StateSelectorSection
+              type="stamp-duty"
+              title="Select Your State for Exact Stamp Duty & Circle Rates"
+              subtitle="Get exact 2026 stamp duty percentages, Ready Reckoner / Guideline values, women buyer concessions, and registration fee caps."
+            />
+          )}
+          <div className="mt-8 space-y-6 lg:hidden">
+            <CalculatorListByCategory
+              title={`More ${calculator.category} Calculators`}
+              category={calculator.category}
+              currentSlug={calculator.slug}
+              limit={8}
+            />
+          </div>
+         
+          {["Finance", "Health", "Construction", "Vehicle"].includes(calculator.category) ? (
+            <>
+              <StepsSection title={`How the ${calculator.name} Works`} steps={calculator.steps} />
+              <FormulaSection {...calculator.formula} />
+            </>
+          ) : ["Math", "Education", "Developer Tools"].includes(calculator.category) ? (
+            <>
+              <FormulaSection {...calculator.formula} />
+              <StepsSection title={`How the ${calculator.name} Works`} steps={calculator.steps} />
+            </>
+          ) : (
+            <>
+              <StepsSection title={`How the ${calculator.name} Works`} steps={calculator.steps} />
+              <FormulaSection {...calculator.formula} />
+            </>
+          )}
+          <FAQSection faqs={calculator.faqs} />
+          <SEOContent content={calculator.seoContent} />
+
+          <LatestArticlesForCalculator
+            calculatorSlug={calculator.slug}
+            calculatorCategory={calculator.category}
+          />
+
+          {calculator.category === "Developer Tools" && (
+            <EmbedCalculatorSection slug={calculator.slug} name={calculator.name} />
+          )}
+
+          {showEditorialAccountability && (
+            <AuthorBio disclaimer={getDisclaimer(calculator.category)} category={calculator.category} />
+          )}
+        </div>
+
+        <aside className="hidden lg:block">
+          <div className="space-y-6">
+            <CalculatorListByCategory
+              title={`More ${calculator.category} Calculators`}
+              category={calculator.category}
+              currentSlug={calculator.slug}
+              limit={8}
+            />
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
